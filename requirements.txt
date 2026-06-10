@@ -2,7 +2,6 @@ streamlit
 openai-whisper
 librosa
 numpy
-language-tool-python
 transformers
 torch
 groq

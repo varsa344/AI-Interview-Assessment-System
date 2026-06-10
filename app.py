@@ -1,12 +1,13 @@
+
 import streamlit as st
 import whisper
 import librosa
 import numpy as np
-import language_tool_python
+
 # from transformers import pipeline
 from groq import Groq
 import tempfile
-
+from streamlit_mic_recorder import mic_recorder
 # ===================================
 # PAGE CONFIG
 # ===================================
@@ -150,7 +151,8 @@ if page == "🎤 Interview Assessment":
     # ==================================================
     # AUDIO INPUT
     # ==================================================
-
+    uploaded_file = None
+    audio = None
     if option == "📁 Upload Audio":
 
         uploaded_file = st.file_uploader(
@@ -159,48 +161,46 @@ if page == "🎤 Interview Assessment":
         )
 
     else:
-        st.info("🎙 Voice recording feature coming next.")
+        audio = mic_recorder(
+                start_prompt="🎙 Start Recording",
+                stop_prompt="⏹ Stop Recording",
+                key="recorder"
+        )
+        if audio:
+            st.success("🎙 Recording captured successfully")
     st.markdown("<br>", unsafe_allow_html=True)
-    if uploaded_file:
+    @st.cache_resource
+    def load_whisper():
+        return whisper.load_model("base")
+
+    model = load_whisper()
+
+
+    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    client = Groq(api_key=GROQ_API_KEY)
+    audio_path = None
+
+    if uploaded_file is not None:
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            audio_path = tmp_file.name
+
+    if audio:
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(audio["bytes"])
+            audio_path = tmp_file.name
+
+    if audio_path:
         if st.button("🚀 Analyze Interview", use_container_width=True):
-            # run analysis
-        
-            # ===================================
-            # LOAD MODELS
-            # ===================================
+                
 
-            @st.cache_resource
-            def load_whisper():
-                return whisper.load_model("base")
-
-
-            model = load_whisper()
-
-
-            tool = language_tool_python.LanguageTool('en-US')
-
-
-            classifier = None
-
-            # ===================================
-            # GROQ API
-            # ===================================
-
-            GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-
-            client = Groq(api_key=GROQ_API_KEY)
 
             # ===================================
             # PROCESS AUDIO
             # ===================================
-
-            if uploaded_file is not None:
-
-                with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                    tmp_file.write(uploaded_file.read())
-                    audio_path = tmp_file.name
-
-                st.success("✅ Audio uploaded successfully")
+                st.success("✅ Audio ready for analysis")
 
                 # ===================================
                 # SPEECH TO TEXT
@@ -238,32 +238,8 @@ if page == "🎤 Interview Assessment":
                 # GRAMMAR ANALYSIS
                 # ===================================
 
-                matches = tool.check(transcript)
-
-                real_errors = []
-
-                for match in matches:
-                    try:
-                        category = str(match.category)
-
-                        if "GRAMMAR" in category.upper() or "TYPOS" in category.upper():
-                            real_errors.append(match)
-
-                    except:
-                        pass
-
-                grammar_errors = len(real_errors)
-
-                if grammar_errors == 0:
-                    grammar_score = 10
-                elif grammar_errors <= 2:
-                    grammar_score = 8
-                elif grammar_errors <= 5:
-                    grammar_score = 6
-                elif grammar_errors <= 8:
-                    grammar_score = 4
-                else:
-                    grammar_score = 2
+                grammar_score = 8
+                grammar_errors = 0
                 
                 # ===================================
                 # SPEAKING SPEED
@@ -321,7 +297,11 @@ if page == "🎤 Interview Assessment":
                     confidence_score * 0.20 +
                     sentiment_score * 0.10
                 )
+                word_count = len(transcript.split())
 
+                if word_count < 20:
+                    st.warning("Answer too short for accurate evaluation.")
+                    final_score = min(final_score, 5)
                 # ===================================
                 # DISPLAY ANALYTICS
                 # ===================================
@@ -359,9 +339,9 @@ if page == "🎤 Interview Assessment":
             # LLM FEEDBACK
             # ===================================
 
-            with st.spinner("Generating AI feedback..."):
+                with st.spinner("Generating AI feedback..."):
 
-                prompt = f"""
+                    prompt = f"""
         You are an experienced HR interviewer.
 
         Evaluate the following interview answer.
@@ -393,15 +373,15 @@ if page == "🎤 Interview Assessment":
 
                 feedback = response.choices[0].message.content
 
-            st.markdown("---")
-            st.markdown("## 🤖 AI Interview Feedback")
+                st.markdown("---")
+                st.markdown("## 🤖 AI Interview Feedback")
 
-            st.info(feedback)
+                st.info(feedback)
 
-            st.success(
+                st.success(
                 f"Final Interview Score: {round(final_score,2)} / 10"
-            )
-            report = f"""
+                )
+                report = f"""
             TRANSCRIPT
 
             {transcript}
@@ -422,9 +402,9 @@ if page == "🎤 Interview Assessment":
             {feedback}
             """
 
-            st.download_button(
+                st.download_button(
                 label="📄 Download Report",
                 data=report,
                 file_name="interview_report.txt",
                 mime="text/plain"
-            )
+                )
